@@ -11,6 +11,7 @@ import {
   getPresentMemberIds,
 } from '../lib/attendance';
 import { recommendNextPicker } from '../lib/rotation';
+import { exportBackPageDocx } from '../lib/exportBackPageDocx';
 
 // Pastor's home screen. Shows:
 //   - Today's-class block: present count + next-up picker (with manual
@@ -109,6 +110,24 @@ export default function Dashboard() {
     }
   };
 
+  const handlePrintBackPage = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const futureTopics = allTopics.filter((t) => t.status === 'possible_future');
+      const pastTopics = allTopics.filter((t) => t.status === 'past');
+      await exportBackPageDocx({
+        futureTopics,
+        pastTopics,
+        rosterMembers: members,
+      });
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleClearNextPick = async () => {
     if (!pickedForNext) return;
     if (
@@ -136,11 +155,22 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-serif text-2xl text-umc-900">{CLASS_NAME}</h1>
-        <p className="text-sm text-gray-600 mt-0.5">
-          Class meets Sundays · {nextSunday === meetingDate ? 'Today' : `Next Sunday: ${nextSunday}`}
-        </p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="font-serif text-2xl text-umc-900">{CLASS_NAME}</h1>
+          <p className="text-sm text-gray-600 mt-0.5">
+            Class meets Sundays · {nextSunday === meetingDate ? 'Today' : `Next Sunday: ${nextSunday}`}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handlePrintBackPage}
+          disabled={busy}
+          className="btn-secondary text-sm disabled:opacity-50"
+          title="Word doc: Possible Future + Past + Roster on one page"
+        >
+          📋 Print Back Page
+        </button>
       </div>
 
       {error && (
@@ -254,7 +284,13 @@ export default function Dashboard() {
             <p className="font-serif text-base text-umc-900 mt-1">
               {pickedForNext.text}
             </p>
-            <div className="flex gap-2 text-xs mt-2">
+            <div className="flex gap-3 text-xs mt-2 flex-wrap">
+              <Link
+                to={`/lesson/${pickedForNext.id}`}
+                className="btn-primary text-xs"
+              >
+                ✏ Edit lesson
+              </Link>
               <button
                 type="button"
                 onClick={handleClearNextPick}
@@ -262,16 +298,23 @@ export default function Dashboard() {
               >
                 Clear pick
               </button>
-              <span className="text-gray-400">
-                · Lesson editor coming in Phase B
-              </span>
             </div>
           </>
         ) : activeLesson ? (
-          <p className="text-sm text-gray-600">
-            Active lesson:{' '}
-            <span className="font-serif text-umc-900">{activeLesson.text}</span>
-          </p>
+          <>
+            <p className="text-sm text-gray-600">Active lesson:</p>
+            <p className="font-serif text-base text-umc-900 mt-1">
+              {activeLesson.text}
+            </p>
+            <div className="mt-2">
+              <Link
+                to={`/lesson/${activeLesson.id}`}
+                className="btn-primary text-xs"
+              >
+                ✏ Edit lesson
+              </Link>
+            </div>
+          </>
         ) : (
           <p className="text-sm text-gray-500 italic">
             No topic picked for next Sunday yet. Use the rotation block above.

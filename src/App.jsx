@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard.jsx';
 import Roster from './pages/Roster.jsx';
 import Attendance from './pages/Attendance.jsx';
 import Topics from './pages/Topics.jsx';
+import LessonWorkspace from './pages/LessonWorkspace.jsx';
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
         <Route path="/roster" element={<Roster />} />
         <Route path="/attendance" element={<Attendance />} />
         <Route path="/topics" element={<Topics />} />
+        <Route path="/lesson/:topicId" element={<LessonWorkspace />} />
       </Route>
       <Route path="*" element={<NotFound />} />
     </Routes>
