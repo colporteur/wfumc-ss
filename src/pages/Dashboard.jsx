@@ -173,6 +173,8 @@ export default function Dashboard() {
         </button>
       </div>
 
+      <PublicLinkCard />
+
       {error && (
         <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
           {error}
@@ -355,5 +357,54 @@ function DashCard({ to, title, count }) {
         {count}
       </p>
     </Link>
+  );
+}
+
+// Show the public URL the pastor can share with class members. Resolves
+// the URL from window.location.origin + the app's base URL + "public".
+// Click-to-copy for convenience.
+function PublicLinkCard() {
+  const [copied, setCopied] = useState(false);
+  const baseUrl =
+    typeof window !== 'undefined'
+      ? window.location.origin + (import.meta.env.BASE_URL || '/')
+      : '/';
+  const publicUrl = baseUrl.replace(/\/$/, '') + '/public';
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(publicUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      window.alert('Copy failed. URL: ' + publicUrl);
+    }
+  };
+  return (
+    <div className="card bg-umc-50 border-umc-200 space-y-1">
+      <p className="text-xs uppercase tracking-wide text-gray-600">
+        Class-facing URL
+      </p>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <a
+          href={publicUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sm text-umc-900 font-mono break-all hover:underline"
+        >
+          {publicUrl}
+        </a>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="text-xs btn-secondary"
+        >
+          {copied ? '✓ Copied' : 'Copy link'}
+        </button>
+      </div>
+      <p className="text-[11px] text-gray-600">
+        Share this with class members — no login required. They can also
+        install it as an app on their phone.
+      </p>
+    </div>
   );
 }

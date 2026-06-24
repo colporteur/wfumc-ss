@@ -1,10 +1,21 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { draftLesson } from '../lib/claude';
 import { prepareImages } from '../lib/imagePrep';
+import {
+  loadImagesForClaude,
+  uploadLessonImage,
+  listImages,
+} from '../lib/lessonImages';
 
 // ✨ Have Claude Make Draft. Optional seed ideas + optional images.
 // Returns a {opening_prompt, pastor_notes, closing_prompt} object that
 // the pastor can edit before applying.
+//
+// Image sources:
+//   - Lesson's saved image library (auto-loaded; only ones flagged
+//     include_in_claude=true are sent)
+//   - Ad-hoc attachments picked in this modal session; optionally
+//     saved to the library via the "Save to lesson library" checkbox
 //
 // Apply modes:
 //   replace  — overwrite the lesson body wholesale (default for fresh
@@ -15,18 +26,29 @@ import { prepareImages } from '../lib/imagePrep';
 // Props:
 //   question    — the topic text (required)
 //   currentNotes — current pastor_notes value (informs merge vs replace UI)
+//   lessonId    — required for library-image loading + ad-hoc save
+//   ownerUserId — required if saveToLibrary is used
 //   onApply     — async ({ opening_prompt, pastor_notes, closing_prompt, mode }) => void
 //   onClose     — () => void
+//   onLibraryChanged — optional callback after ad-hoc images get saved
 export default function DraftLessonModal({
   question,
   currentNotes = '',
+  lessonId,
+  ownerUserId,
   onApply,
   onClose,
+  onLibraryChanged,
 }) {
   const [seedIdeas, setSeedIdeas] = useState('');
-  const [imageFiles, setImageFiles] = useState([]); // raw File[]
-  const [preppedImages, setPreppedImages] = useState([]); // base64 ready
+  const [imageFiles, setImageFiles] = useState([]); // raw File[] (ad-hoc)
+  const [preppedImages, setPreppedImages] = useState([]); // base64 ready (ad-hoc)
   const [imagePrepWarnings, setImagePrepWarnings] = useState([]);
+  // "Save ad-hoc uploads to the lesson library after Claude responds"
+  // — default true so most uses are sticky.
+  const [saveToLibrary, setSaveToLibrary] = useState(true);
+  // Snapshot of library images currently in the lesson, for context display.
+  const [libraryImages, setLibraryImages] = useState([]);
   const [drafting, setDrafting] = useState(false);
   const [error, setError] = useState(null);
   const [draft, setDraft] = useState(null); // { opening_prompt, pastor_notes, closing_prompt }
@@ -38,6 +60,28 @@ export default function DraftLessonModal({
   const [mode, setMode] = useState(currentNotes.trim() ? 'merge' : 'replace');
 
   const hasExistingNotes = !!currentNotes.trim();
+
+  // Load the lesson's library images on mount so we can show the
+  // pastor what Claude will already see before they consider adding
+  // ad-hoc attachments.
+  useEffect(() => {
+    if (!lessonId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await listImages(lessonId);
+        if (!cancelled) setLibraryImages(list);
+      } catch (e) {
+        // Non-fatal — just lose the preview.
+        console.warn('Could not preload library images:', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [lessonId]);
+
+  const claudeReadyLibraryImages = libraryImages.filter((i) => i.include_in_claude);
 
   const handleFilesChosen = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -69,15 +113,48 @@ export default function DraftLessonModal({
     setDrafting(true);
     setError(null);
     try {
+      // Combine library images (already in storage, fetched + re-base64'd)
+      // with ad-hoc attachments (already base64 in memory).
+      const libImages = lessonId
+        ? await loadImagesForClaude(lessonId)
+        : [];
+      const allImages = [...libImages, ...preppedImages];
+
       const result = await draftLesson({
         question,
         seedIdeas,
-        images: preppedImages,
+        images: allImages,
       });
       setDraft(result);
       setEditOpening(result.opening_prompt);
       setEditNotes(result.pastor_notes);
       setEditClosing(result.closing_prompt);
+
+      // After Claude returns, persist ad-hoc uploads to the library if
+      // the pastor opted in. We do this AFTER the draft so a Claude
+      // failure doesn't leave behind orphan library entries.
+      if (
+        saveToLibrary &&
+        lessonId &&
+        ownerUserId &&
+        imageFiles.length > 0
+      ) {
+        for (const f of imageFiles) {
+          try {
+            await uploadLessonImage({
+              ownerUserId,
+              lessonId,
+              file: f,
+            });
+          } catch (e) {
+            console.warn('Save-to-library failed for', f.name, e);
+          }
+        }
+        // Empty the ad-hoc set so repeat clicks don't re-upload.
+        setImageFiles([]);
+        setPreppedImages([]);
+        onLibraryChanged?.();
+      }
     } catch (e) {
       setError(e.message || String(e));
     } finally {
@@ -148,10 +225,25 @@ export default function DraftLessonModal({
             />
           </div>
 
+          {/* Library images Claude will already see */}
+          {claudeReadyLibraryImages.length > 0 && (
+            <div className="text-xs text-gray-700 bg-blue-50 border border-blue-200 rounded px-3 py-2">
+              <span className="font-medium">
+                Claude will see {claudeReadyLibraryImages.length} image
+                {claudeReadyLibraryImages.length === 1 ? '' : 's'} from this lesson's library:
+              </span>
+              <div className="mt-1 text-[11px] text-gray-600">
+                {claudeReadyLibraryImages
+                  .map((i) => i.caption || i.original_name || 'untitled')
+                  .join(' · ')}
+              </div>
+            </div>
+          )}
+
           {/* Image attachments */}
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">
-              Attach images (optional)
+              Attach additional images (optional, this draft only by default)
             </label>
             <input
               type="file"
@@ -164,6 +256,19 @@ export default function DraftLessonModal({
             <p className="text-[11px] text-gray-500 mt-1">
               Article screenshots, whiteboard sketches, photos. Auto-downsized before sending.
             </p>
+            {preppedImages.length > 0 && lessonId && (
+              <label className="mt-2 flex items-center gap-2 text-[11px] text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={saveToLibrary}
+                  onChange={(e) => setSaveToLibrary(e.target.checked)}
+                  disabled={drafting}
+                />
+                Save these {preppedImages.length} image
+                {preppedImages.length === 1 ? '' : 's'} to the lesson's
+                library (preserves them for next time + printed handout)
+              </label>
+            )}
             {preppedImages.length > 0 && (
               <ul className="mt-2 space-y-1">
                 {preppedImages.map((img, i) => (

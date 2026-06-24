@@ -5,12 +5,19 @@ import { brainstormLesson } from '../lib/claude';
 // Each idea has a "Use this" button that appends it to the lesson notes
 // as a single bullet (the pastor can then keep developing).
 //
+// NOTE: Brainstorm doesn't use Claude vision (text-only); image input
+// is reserved for the full-draft path where multimodal really helps.
+// We DO show the pastor what library images are attached so they know
+// Claude isn't seeing them in this mode.
+//
 // Props:
 //   question      — the topic text (required)
+//   lessonId      — optional; if provided, library-image awareness
 //   onUseIdea     — (ideaText) => void (parent appends as bullet)
 //   onClose       — () => void
 export default function BrainstormLessonModal({
   question,
+  lessonId,
   onUseIdea,
   onClose,
 }) {

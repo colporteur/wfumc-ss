@@ -7,11 +7,26 @@ import Roster from './pages/Roster.jsx';
 import Attendance from './pages/Attendance.jsx';
 import Topics from './pages/Topics.jsx';
 import LessonWorkspace from './pages/LessonWorkspace.jsx';
+import PublicLayout from './components/PublicLayout.jsx';
+import PublicActive from './pages/PublicActive.jsx';
+import PublicTopics from './pages/PublicTopics.jsx';
+import PublicRoster from './pages/PublicRoster.jsx';
+import PublicSuggest from './pages/PublicSuggest.jsx';
 
 export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+
+      {/* Public-facing — no auth, no admin chrome. */}
+      <Route element={<PublicLayout />}>
+        <Route path="/public" element={<PublicActive />} />
+        <Route path="/public/topics" element={<PublicTopics />} />
+        <Route path="/public/roster" element={<PublicRoster />} />
+        <Route path="/public/suggest" element={<PublicSuggest />} />
+      </Route>
+
+      {/* Admin — pastor only. */}
       <Route
         element={
           <ProtectedRoute>
@@ -25,6 +40,7 @@ export default function App() {
         <Route path="/topics" element={<Topics />} />
         <Route path="/lesson/:topicId" element={<LessonWorkspace />} />
       </Route>
+
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

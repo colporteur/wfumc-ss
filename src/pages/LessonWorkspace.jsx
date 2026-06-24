@@ -5,6 +5,8 @@ import LoadingSpinner from '../components/LoadingSpinner.jsx';
 import DraftLessonModal from '../components/DraftLessonModal.jsx';
 import BrainstormLessonModal from '../components/BrainstormLessonModal.jsx';
 import InsertVerseModal from '../components/InsertVerseModal.jsx';
+import LessonImagesPanel from '../components/LessonImagesPanel.jsx';
+import { loadImagesForClaude, listImages } from '../lib/lessonImages';
 import { supabase, withTimeout } from '../lib/supabase';
 import {
   loadLessonForTopic,
@@ -31,6 +33,12 @@ export default function LessonWorkspace() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [topic, setTopic] = useState(null);
+  // The lesson row's id — captured after first load/upsert. Required
+  // before images can be attached (the image rows reference it).
+  const [lessonId, setLessonId] = useState(null);
+  // Bumped after image-library mutations from inside a modal so the
+  // LessonImagesPanel re-fetches.
+  const [imagesRefreshKey, setImagesRefreshKey] = useState(0);
   // Editable lesson fields. Mirrored from DB on load; pastor edits;
   // Save button writes back.
   const [openingPrompt, setOpeningPrompt] = useState('');
@@ -77,6 +85,7 @@ export default function LessonWorkspace() {
       }
       setTopic(t);
       const lesson = await loadLessonForTopic(topicId);
+      setLessonId(lesson?.id || null);
       const op = lesson?.opening_prompt || '';
       const pn = lesson?.pastor_notes || '';
       const cp = lesson?.closing_prompt || 'What are your thoughts?';
@@ -122,7 +131,7 @@ export default function LessonWorkspace() {
       } else {
         expiresAt = null;
       }
-      await upsertLesson({
+      const savedLesson = await upsertLesson({
         ownerUserId: user.id,
         topicId,
         openingPrompt: openingPrompt.trim() || null,
@@ -131,6 +140,7 @@ export default function LessonWorkspace() {
         homeworkText: homeworkText.trim() || null,
         homeworkExpiresAt: expiresAt,
       });
+      if (savedLesson?.id && !lessonId) setLessonId(savedLesson.id);
       setSavedSnapshot({
         openingPrompt,
         pastorNotes,
@@ -173,11 +183,15 @@ export default function LessonWorkspace() {
     setBusy(true);
     setError(null);
     try {
+      // Fetch the latest image list at print time so newly-uploaded
+      // images appear in the doc without requiring a page refresh.
+      const images = lessonId ? await listImages(lessonId) : [];
       await exportLessonDocx({
         topicText: topic.text,
         openingPrompt,
         pastorNotes,
         closingPrompt,
+        images,
         dateForFilename: topic.discussed_on || '',
       });
     } catch (e) {
@@ -446,13 +460,25 @@ export default function LessonWorkspace() {
         </div>
       </div>
 
+      {/* Image library */}
+      <div className="card">
+        <LessonImagesPanel
+          key={imagesRefreshKey}
+          lessonId={lessonId}
+          ownerUserId={user.id}
+        />
+      </div>
+
       {/* Modals */}
       {draftOpen && (
         <DraftLessonModal
           question={topic.text}
           currentNotes={pastorNotes}
+          lessonId={lessonId}
+          ownerUserId={user.id}
           onApply={applyDraft}
           onClose={() => setDraftOpen(false)}
+          onLibraryChanged={() => setImagesRefreshKey((k) => k + 1)}
         />
       )}
       {brainstormOpen && (

@@ -14,12 +14,16 @@ import {
   Document,
   Paragraph,
   TextRun,
+  ImageRun,
   AlignmentType,
+  HeadingLevel,
   LevelFormat,
+  PageBreak,
   convertInchesToTwip,
   Packer,
 } from 'docx';
 import { CLASS_NAME } from './config';
+import { publicUrlFor } from './lessonImages';
 
 function safeFilename(s) {
   return (s || '')
@@ -63,11 +67,51 @@ function parseBullets(notesText) {
   return out;
 }
 
+// Fetch image bytes from public URL → Uint8Array for docx ImageRun.
+// Returns { bytes, width, height } sized to fit a typical print page
+// (max 6" wide preserving aspect ratio).
+async function fetchImageForDocx(image) {
+  const url = publicUrlFor(image.storage_path);
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    throw new Error(
+      `Image fetch failed for "${image.original_name || image.id}" (HTTP ${resp.status}).`
+    );
+  }
+  const blob = await resp.blob();
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  // Probe dimensions via createImageBitmap so we can preserve aspect ratio.
+  let displayWidth = 432; // 6" at 72dpi
+  let displayHeight = 324; // fallback 4:3
+  try {
+    const bitmap = await createImageBitmap(blob);
+    const maxW = 432;
+    const w = bitmap.width;
+    const h = bitmap.height;
+    if (w > 0 && h > 0) {
+      if (w > maxW) {
+        displayWidth = maxW;
+        displayHeight = Math.round((h * maxW) / w);
+      } else {
+        displayWidth = w;
+        displayHeight = h;
+      }
+    }
+    bitmap.close?.();
+  } catch {
+    // Some browsers / blob types may not support createImageBitmap;
+    // we fall back to the default 4:3 estimate. The image still renders
+    // — it just may not have perfect aspect ratio.
+  }
+  return { bytes, width: displayWidth, height: displayHeight };
+}
+
 export async function buildLessonDocx({
   topicText,
   openingPrompt,
   pastorNotes,
   closingPrompt,
+  images = [],
 }) {
   const bullets = parseBullets(pastorNotes);
   const paragraphs = [];
@@ -158,6 +202,89 @@ export async function buildLessonDocx({
         ],
       })
     );
+  }
+
+  // Image appendix — print-flagged images only. Each gets a page-break
+  // before, then the image, then an optional caption below it.
+  const printable = (images || []).filter((i) => i.include_in_print);
+  if (printable.length > 0) {
+    // Section divider before the appendix.
+    paragraphs.push(
+      new Paragraph({
+        children: [new PageBreak()],
+      })
+    );
+    paragraphs.push(
+      new Paragraph({
+        heading: HeadingLevel.HEADING_2,
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 240 },
+        children: [
+          new TextRun({
+            text: 'Images',
+            italics: true,
+            size: 24,
+          }),
+        ],
+      })
+    );
+    for (let i = 0; i < printable.length; i++) {
+      const img = printable[i];
+      try {
+        const { bytes, width, height } = await fetchImageForDocx(img);
+        paragraphs.push(
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { before: 240, after: 80 },
+            children: [
+              new ImageRun({
+                type: 'jpg',
+                data: bytes,
+                transformation: { width, height },
+                altText: {
+                  title: img.caption || img.original_name || 'Image',
+                  description: img.caption || img.original_name || 'Lesson image',
+                  name: img.original_name || `image-${i + 1}`,
+                },
+              }),
+            ],
+          })
+        );
+        if (img.caption && img.caption.trim()) {
+          paragraphs.push(
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              spacing: { after: 200 },
+              children: [
+                new TextRun({
+                  text: img.caption.trim(),
+                  italics: true,
+                  size: 20,
+                  color: '555555',
+                }),
+              ],
+            })
+          );
+        }
+      } catch (e) {
+        // Don't fail the whole export if one image can't be fetched —
+        // surface as a placeholder so the pastor can see which broke.
+        paragraphs.push(
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 200 },
+            children: [
+              new TextRun({
+                text: `[Image unavailable: ${img.original_name || img.id} — ${e.message || 'unknown error'}]`,
+                italics: true,
+                color: 'aa3333',
+                size: 20,
+              }),
+            ],
+          })
+        );
+      }
+    }
   }
 
   const doc = new Document({

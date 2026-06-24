@@ -18,3 +18,11 @@ export const CLASS_END_MINUTE_CT = 30; // 9:30 AM Central
 // IANA timezone used to anchor the class clock regardless of where the
 // pastor or class members are physically.
 export const CLASS_TIMEZONE = 'America/Chicago';
+
+// Pastor's auth.users id, used by the /public/* pages to scope all
+// reads to the single pastor's data without requiring login. Set in
+// the build env (VITE_PASTOR_USER_ID); falls back to null which the
+// public pages detect and surface a "not configured" message rather
+// than silently rendering empty content.
+export const PASTOR_USER_ID =
+  import.meta.env.VITE_PASTOR_USER_ID || null;
