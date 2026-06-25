@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase, withTimeout } from '../lib/supabase';
 import { PASTOR_USER_ID } from '../lib/config';
 import LoadingSpinner from '../components/LoadingSpinner.jsx';
@@ -108,18 +109,36 @@ export default function PublicTopics() {
         <p className="text-sm text-gray-500 italic">No topics found.</p>
       ) : (
         <ul className="divide-y divide-gray-100 border border-gray-200 rounded">
-          {filtered.map((t) => (
-            <li key={t.id} className="px-3 py-2">
-              <p className="text-sm text-gray-900 font-serif">{t.text}</p>
-              {(t.discussed_on || t.submitted_by_name) && (
-                <p className="text-[11px] text-gray-500 mt-0.5">
-                  {t.discussed_on}
-                  {t.discussed_on && t.submitted_by_name && ' · '}
-                  {t.submitted_by_name && `Suggested by ${t.submitted_by_name}`}
-                </p>
-              )}
-            </li>
-          ))}
+          {filtered.map((t) => {
+            // Past topics get a click-through to the lesson view; future
+            // topics don't have a lesson yet, so they render as plain rows.
+            const body = (
+              <>
+                <p className="text-sm text-gray-900 font-serif">{t.text}</p>
+                {(t.discussed_on || t.submitted_by_name) && (
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    {t.discussed_on}
+                    {t.discussed_on && t.submitted_by_name && ' · '}
+                    {t.submitted_by_name && `Suggested by ${t.submitted_by_name}`}
+                  </p>
+                )}
+              </>
+            );
+            return (
+              <li key={t.id} className="px-3 py-2">
+                {t.status === 'past' ? (
+                  <Link
+                    to={`/public/lesson/${t.id}`}
+                    className="block hover:bg-gray-50 -mx-3 -my-2 px-3 py-2"
+                  >
+                    {body}
+                  </Link>
+                ) : (
+                  body
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

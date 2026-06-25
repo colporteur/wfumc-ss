@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import LoadingSpinner from '../components/LoadingSpinner.jsx';
 import {
@@ -179,6 +180,13 @@ export default function Topics() {
             {allTopics.length} total · manage the question bank for the class
           </p>
         </div>
+        <Link
+          to="/import-lessons"
+          className="btn-secondary text-sm whitespace-nowrap"
+          title="Bulk-import past lesson handouts (DOCX/PDF) and attach to existing topics"
+        >
+          📥 Import past lessons
+        </Link>
       </div>
 
       {error && (
@@ -315,6 +323,15 @@ export default function Topics() {
                     )}
                   </div>
                   <div className="flex flex-col gap-1 text-xs items-end">
+                    {/* Lesson workspace is meaningful for any non-"possible_future" topic */}
+                    {t.status !== 'possible_future' && (
+                      <Link
+                        to={`/lesson/${t.id}`}
+                        className="text-umc-700 hover:text-umc-900 underline whitespace-nowrap"
+                      >
+                        ✏ Open lesson
+                      </Link>
+                    )}
                     <button
                       type="button"
                       onClick={() => {

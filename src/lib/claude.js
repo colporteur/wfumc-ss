@@ -214,6 +214,96 @@ export async function brainstormLesson({ question, seedIdeas = '' } = {}) {
 }
 
 // =====================================================================
+// matchLessonToTopic — given a lesson body excerpt + a list of past
+// topics, ask Claude which topic this lesson most likely belongs to.
+// Used by the bulk-import flow to backfill historical lesson handouts.
+//
+// Returns { topicId: string|null, confidence: 'high'|'medium'|'low'|'none', reasoning: string }
+// =====================================================================
+export async function matchLessonToTopic({ lessonText, candidates }) {
+  const text = (lessonText || '').trim();
+  if (!text) {
+    return {
+      topicId: null,
+      confidence: 'none',
+      reasoning: 'Lesson body is empty.',
+    };
+  }
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return {
+      topicId: null,
+      confidence: 'none',
+      reasoning: 'No candidate topics provided.',
+    };
+  }
+
+  // Cap input — Claude doesn't need the whole 5-page lesson to pick a
+  // topic. First ~3000 chars is plenty.
+  const snippet = text.length > 3000 ? text.slice(0, 3000) + '\n…' : text;
+
+  // Build a compact candidate list. Cap at 200 to avoid token blowups
+  // on huge archives (the pastor has ~150 past topics so this is fine).
+  const list = candidates.slice(0, 200).map((c, idx) => ({
+    n: idx,
+    id: c.id,
+    text: c.text,
+  }));
+
+  const system = [
+    'You match a historical Sunday School lesson handout to one of the',
+    "class's past discussion topics. The lesson body is given below;",
+    'the candidate topics are numbered 0..N. Pick the single best match.',
+    '',
+    'Output a JSON object:',
+    '  { "n": 5, "confidence": "high", "reasoning": "the lesson opens by quoting the question verbatim" }',
+    '',
+    "Use 'high' confidence when the question text appears in the lesson",
+    "(verbatim or near-verbatim). 'medium' when the lesson is clearly",
+    'about the topic theme even if the question isn\'t quoted exactly.',
+    "'low' when there's a plausible thematic match but no strong",
+    "evidence. 'none' when no candidate is a good match — in that case",
+    'return n: null.',
+    '',
+    'No prose around the JSON. No code fence.',
+  ].join('\n');
+
+  const userParts = [
+    'CANDIDATE TOPICS:',
+    list.map((c) => `${c.n}. ${c.text}`).join('\n'),
+    '',
+    'LESSON BODY (excerpt):',
+    snippet,
+  ].join('\n');
+
+  const response = await callClaude(
+    {
+      system,
+      messages: [{ role: 'user', content: userParts }],
+      max_tokens: 400,
+    },
+    { timeoutMs: 60000 }
+  );
+  const out = extractText(response);
+  const parsed = parseJsonLoose(out);
+  if (!parsed) {
+    return {
+      topicId: null,
+      confidence: 'none',
+      reasoning: 'Could not parse Claude response.',
+    };
+  }
+  const n = Number.isInteger(parsed.n) ? parsed.n : null;
+  const matched = n !== null && n >= 0 && n < list.length ? list[n] : null;
+  return {
+    topicId: matched?.id ?? null,
+    confidence: ['high', 'medium', 'low', 'none'].includes(parsed.confidence)
+      ? parsed.confidence
+      : 'none',
+    reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning : '',
+  };
+}
+
+// =====================================================================
 // lookupScriptureNRSVUe — ported from Sermons App. Returns prose +
 // blank line + reference on its own line.
 // =====================================================================

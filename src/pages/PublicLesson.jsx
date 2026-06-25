@@ -1,0 +1,227 @@
+import { useEffect, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { supabase, withTimeout } from '../lib/supabase';
+import { publicUrlFor } from '../lib/lessonImages';
+import { isHomeworkActive } from '../lib/lessons';
+import { PASTOR_USER_ID } from '../lib/config';
+import LoadingSpinner from '../components/LoadingSpinner.jsx';
+
+// Public per-lesson view — for class members revisiting a past lesson
+// (most common) or sharing a specific lesson link.
+//
+// Renders the same way PublicActive does, but for any topic id.
+// A topic with no saved lesson body still renders (just shows the
+// question + a note that no notes are available).
+export default function PublicLesson() {
+  const { topicId } = useParams();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [topic, setTopic] = useState(null);
+  const [lesson, setLesson] = useState(null);
+  const [images, setImages] = useState([]);
+
+  useEffect(() => {
+    if (!PASTOR_USER_ID || !topicId) {
+      setError('Public site not configured.');
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const { data: t, error: tErr } = await withTimeout(
+          supabase
+            .from('ss_topics')
+            .select(
+              'id, text, status, discussed_on, submitted_by_name, ' +
+                'picked_by:picked_by_member_id(display_name)'
+            )
+            .eq('owner_user_id', PASTOR_USER_ID)
+            .eq('id', topicId)
+            .maybeSingle()
+        );
+        if (tErr) throw tErr;
+        if (!t) {
+          setError('Lesson not found.');
+          return;
+        }
+        if (cancelled) return;
+        setTopic(t);
+        const { data: l, error: lErr } = await withTimeout(
+          supabase
+            .from('ss_lessons')
+            .select('*')
+            .eq('topic_id', topicId)
+            .maybeSingle()
+        );
+        if (lErr) throw lErr;
+        setLesson(l || null);
+        if (l?.id) {
+          const { data: imgs, error: iErr } = await withTimeout(
+            supabase
+              .from('ss_lesson_images')
+              .select('*')
+              .eq('lesson_id', l.id)
+              .eq('include_in_print', true)
+              .order('sort_order', { ascending: true })
+          );
+          if (iErr) throw iErr;
+          if (!cancelled) setImages(imgs || []);
+        }
+      } catch (e) {
+        if (!cancelled) setError(e.message || String(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [topicId]);
+
+  if (loading) return <LoadingSpinner label="Loading lesson…" />;
+  if (error) {
+    return (
+      <div className="space-y-3">
+        <Link to="/public/topics" className="text-sm text-gray-500 hover:text-gray-700">
+          ← All topics
+        </Link>
+        <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+          {error}
+        </p>
+      </div>
+    );
+  }
+  if (!topic) return null;
+
+  const homework = isHomeworkActive(lesson || {});
+  const bullets = parseBullets(lesson?.pastor_notes || '');
+
+  return (
+    <article className="space-y-5">
+      <Link to="/public/topics" className="text-sm text-gray-500 hover:text-gray-700">
+        ← All topics
+      </Link>
+
+      <div>
+        {topic.status === 'past' && topic.discussed_on && (
+          <p className="text-[11px] uppercase tracking-wide text-gray-500 font-medium">
+            Discussed {topic.discussed_on}
+          </p>
+        )}
+        {topic.status === 'active' && (
+          <p className="text-[11px] uppercase tracking-wide text-green-700 font-medium">
+            Active lesson
+          </p>
+        )}
+        {topic.status === 'picked_for_next' && (
+          <p className="text-[11px] uppercase tracking-wide text-blue-700 font-medium">
+            Coming up{topic.discussed_on ? ` · ${topic.discussed_on}` : ''}
+          </p>
+        )}
+        <h2 className="font-serif text-2xl text-umc-900 mt-1 leading-tight">
+          {topic.text}
+        </h2>
+        {(topic.picked_by?.display_name || topic.submitted_by_name) && (
+          <p className="text-xs text-gray-500 mt-1">
+            {topic.picked_by?.display_name && `Picked by ${topic.picked_by.display_name}`}
+            {topic.picked_by?.display_name && topic.submitted_by_name && ' · '}
+            {topic.submitted_by_name && `Suggested by ${topic.submitted_by_name}`}
+          </p>
+        )}
+      </div>
+
+      {homework && (
+        <div className="bg-amber-50 border-l-4 border-amber-400 px-4 py-3 rounded">
+          <p className="text-[11px] uppercase tracking-wide text-amber-800 font-medium">
+            Homework before class
+          </p>
+          <p className="text-sm text-gray-800 mt-1 whitespace-pre-wrap font-serif leading-relaxed">
+            {lesson.homework_text}
+          </p>
+        </div>
+      )}
+
+      {!lesson ? (
+        <p className="text-sm text-gray-500 italic">
+          No lesson notes saved for this topic.
+        </p>
+      ) : (
+        <>
+          {lesson.opening_prompt && (
+            <p className="text-sm text-gray-800 font-serif leading-relaxed">
+              {lesson.opening_prompt}
+            </p>
+          )}
+          {bullets.length > 0 && (
+            <>
+              <p className="text-xs italic text-gray-600">
+                A few thoughts from Pastor Todd
+              </p>
+              <ul className="list-disc pl-5 space-y-2 text-sm text-gray-800 font-serif leading-relaxed">
+                {bullets.map((b, i) => (
+                  <li key={i}>{b}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          {lesson.closing_prompt && (
+            <p className="text-sm text-gray-800 italic font-serif">
+              {lesson.closing_prompt}
+            </p>
+          )}
+        </>
+      )}
+
+      {images.length > 0 && (
+        <div className="space-y-4 mt-6 pt-4 border-t border-gray-100">
+          {images.map((img) => (
+            <figure key={img.id} className="space-y-1">
+              <img
+                src={publicUrlFor(img.storage_path)}
+                alt={img.caption || img.original_name || ''}
+                className="w-full rounded border border-gray-200"
+              />
+              {img.caption && (
+                <figcaption className="text-xs text-gray-600 italic text-center">
+                  {img.caption}
+                </figcaption>
+              )}
+            </figure>
+          ))}
+        </div>
+      )}
+    </article>
+  );
+}
+
+function parseBullets(notesText) {
+  if (!notesText) return [];
+  const lines = notesText.split(/\r?\n/);
+  const out = [];
+  let buffer = '';
+  const flush = () => {
+    if (buffer.trim()) out.push(buffer.trim());
+    buffer = '';
+  };
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) {
+      flush();
+      continue;
+    }
+    const dash = line.match(/^[-*•]\s+(.*)$/);
+    if (dash) {
+      flush();
+      buffer = dash[1];
+    } else if (buffer) {
+      buffer += ' ' + line;
+    } else {
+      buffer = line;
+    }
+  }
+  flush();
+  return out;
+}

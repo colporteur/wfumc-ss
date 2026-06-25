@@ -7,11 +7,13 @@ import Roster from './pages/Roster.jsx';
 import Attendance from './pages/Attendance.jsx';
 import Topics from './pages/Topics.jsx';
 import LessonWorkspace from './pages/LessonWorkspace.jsx';
+import BulkImportLessons from './pages/BulkImportLessons.jsx';
 import PublicLayout from './components/PublicLayout.jsx';
 import PublicActive from './pages/PublicActive.jsx';
 import PublicTopics from './pages/PublicTopics.jsx';
 import PublicRoster from './pages/PublicRoster.jsx';
 import PublicSuggest from './pages/PublicSuggest.jsx';
+import PublicLesson from './pages/PublicLesson.jsx';
 
 export default function App() {
   return (
@@ -22,6 +24,7 @@ export default function App() {
       <Route element={<PublicLayout />}>
         <Route path="/public" element={<PublicActive />} />
         <Route path="/public/topics" element={<PublicTopics />} />
+        <Route path="/public/lesson/:topicId" element={<PublicLesson />} />
         <Route path="/public/roster" element={<PublicRoster />} />
         <Route path="/public/suggest" element={<PublicSuggest />} />
       </Route>
@@ -39,6 +42,7 @@ export default function App() {
         <Route path="/attendance" element={<Attendance />} />
         <Route path="/topics" element={<Topics />} />
         <Route path="/lesson/:topicId" element={<LessonWorkspace />} />
+        <Route path="/import-lessons" element={<BulkImportLessons />} />
       </Route>
 
       <Route path="*" element={<NotFound />} />
