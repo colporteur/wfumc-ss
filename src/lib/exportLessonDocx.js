@@ -161,7 +161,6 @@ export async function buildLessonDocx({
           children: [
             new TextRun({
               text: header,
-              italics: true,
               bold: true,
               size: 22, // 11pt
             }),
@@ -303,6 +302,20 @@ export async function buildLessonDocx({
   const doc = new Document({
     creator: CLASS_NAME,
     title: topicText || 'Sunday School Lesson',
+    // Document-wide default font. Albertus Medium matches the
+    // PowerPoint slide convention used by the WFUMC suite — Word
+    // viewers without the font installed will fall back to a system
+    // serif, which is acceptable. All TextRuns inherit this unless
+    // they override `font` explicitly.
+    styles: {
+      default: {
+        document: {
+          run: {
+            font: 'Albertus Medium',
+          },
+        },
+      },
+    },
     numbering: {
       config: [
         {

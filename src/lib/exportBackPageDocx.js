@@ -129,6 +129,18 @@ export async function buildBackPageDocx({
   const doc = new Document({
     creator: CLASS_NAME,
     title: 'Class Back Page',
+    // Document-wide default font — matches the lesson handout export
+    // and the rest of the WFUMC suite. Word viewers without the font
+    // installed will fall back to a system serif.
+    styles: {
+      default: {
+        document: {
+          run: {
+            font: 'Albertus Medium',
+          },
+        },
+      },
+    },
     numbering: {
       config: [
         {
