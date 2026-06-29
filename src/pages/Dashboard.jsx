@@ -78,10 +78,29 @@ export default function Dashboard() {
     () => allTopics.filter((t) => t.status === 'possible_future'),
     [allTopics]
   );
-  const pickedForNext = useMemo(
-    () => allTopics.find((t) => t.status === 'picked_for_next'),
+  // All picked_for_next topics — there *should* be only one, but if
+  // last week's pick never got finalized to "past", we'll have two (or
+  // more). Sort by discussed_on desc then updated_at desc so the
+  // dashboard shows the most-recent pick first.
+  const pickedForNextAll = useMemo(
+    () =>
+      allTopics
+        .filter((t) => t.status === 'picked_for_next')
+        .sort((a, b) => {
+          const da = a.discussed_on || '';
+          const db = b.discussed_on || '';
+          if (da !== db) return da < db ? 1 : -1;
+          const ua = a.updated_at || '';
+          const ub = b.updated_at || '';
+          return ua < ub ? 1 : -1;
+        }),
     [allTopics]
   );
+  const pickedForNext = pickedForNextAll[0] || null;
+  // True when the data has more than one picked_for_next — usually
+  // because last week's pick never got finalized. Surface a banner so
+  // the pastor can clean it up.
+  const hasStalePickedForNext = pickedForNextAll.length > 1;
   const activeLesson = useMemo(
     () => allTopics.find((t) => t.status === 'active'),
     [allTopics]
@@ -93,9 +112,33 @@ export default function Dashboard() {
 
   const handleMarkPicked = async () => {
     if (!recommendation.next || !topicToAssign) return;
+
+    // Any existing picked_for_next topics that aren't the one we're
+    // about to set get auto-demoted to "past" — last week's pick was
+    // either already discussed or got skipped, but in either case
+    // shouldn't sit in the "Next Sunday" slot. This is what fixes the
+    // "two picked_for_next" data-integrity bug.
+    const toDemote = pickedForNextAll.filter((t) => t.id !== topicToAssign);
+    if (toDemote.length > 0) {
+      const titles = toDemote.map((t) => `"${t.text}"`).join(', ');
+      if (
+        !window.confirm(
+          `There's already a topic picked for next Sunday: ${titles}. ` +
+            'Recording this new pick will move that one to Past Topics. Continue?'
+        )
+      ) {
+        return;
+      }
+    }
+
     setBusy(true);
     setError(null);
     try {
+      for (const t of toDemote) {
+        await setStatus(t.id, 'past', {
+          discussed_on: t.discussed_on || lastSundayISO(),
+        });
+      }
       await setStatus(topicToAssign, 'picked_for_next', {
         picked_by_member_id: recommendation.next.id,
         discussed_on: nextSunday,
@@ -179,6 +222,23 @@ export default function Dashboard() {
         <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
           {error}
         </p>
+      )}
+
+      {hasStalePickedForNext && (
+        <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2 space-y-1">
+          <p>
+            <strong>Heads up:</strong> {pickedForNextAll.length} topics
+            are currently marked "picked for next Sunday." Showing the
+            most recent below.
+          </p>
+          <p className="text-xs">
+            To clean up, open the{' '}
+            <Link to="/topics" className="underline">
+              Topics page → Picked for Next tab
+            </Link>{' '}
+            and move the older one to Past.
+          </p>
+        </div>
       )}
 
       {/* Today's class card */}
