@@ -51,12 +51,10 @@ export default function DraftLessonModal({
   const [libraryImages, setLibraryImages] = useState([]);
   const [drafting, setDrafting] = useState(false);
   const [error, setError] = useState(null);
-  const [draft, setDraft] = useState(null); // { opening_prompt, pastor_notes, closing_prompt }
-  // Editable copies of the returned draft so pastor can tweak in-place
-  // before applying.
-  const [editOpening, setEditOpening] = useState('');
-  const [editNotes, setEditNotes] = useState('');
-  const [editClosing, setEditClosing] = useState('');
+  // Editable sections from Claude's draft, so the pastor can tweak
+  // header / body / order / count before applying.
+  const [editSections, setEditSections] = useState([]);
+  const [hasDraft, setHasDraft] = useState(false);
   const [mode, setMode] = useState(currentNotes.trim() ? 'merge' : 'replace');
 
   const hasExistingNotes = !!currentNotes.trim();
@@ -125,10 +123,8 @@ export default function DraftLessonModal({
         seedIdeas,
         images: allImages,
       });
-      setDraft(result);
-      setEditOpening(result.opening_prompt);
-      setEditNotes(result.pastor_notes);
-      setEditClosing(result.closing_prompt);
+      setEditSections(result.sections || []);
+      setHasDraft(true);
 
       // After Claude returns, persist ad-hoc uploads to the library if
       // the pastor opted in. We do this AFTER the draft so a Claude
@@ -163,11 +159,36 @@ export default function DraftLessonModal({
   };
 
   const handleApply = () => {
-    onApply({
-      opening_prompt: editOpening,
-      pastor_notes: editNotes,
-      closing_prompt: editClosing,
-      mode,
+    // Drop entirely-blank sections; the workspace expects each entry
+    // to have at least a header or a body.
+    const sectionsToApply = editSections
+      .map((s) => ({
+        header: typeof s.header === 'string' ? s.header.trim() : '',
+        body: typeof s.body === 'string' ? s.body : '',
+      }))
+      .filter((s) => s.header || s.body.trim());
+    onApply({ sections: sectionsToApply, mode });
+  };
+
+  // Inline-edit helpers for the draft preview.
+  const updateDraftSection = (idx, patch) => {
+    setEditSections((prev) =>
+      prev.map((s, i) => (i === idx ? { ...s, ...patch } : s))
+    );
+  };
+  const addDraftSection = () => {
+    setEditSections((prev) => [...prev, { header: '', body: '' }]);
+  };
+  const deleteDraftSection = (idx) => {
+    setEditSections((prev) => prev.filter((_, i) => i !== idx));
+  };
+  const moveDraftSection = (idx, dir) => {
+    const target = dir === 'up' ? idx - 1 : idx + 1;
+    if (target < 0 || target >= editSections.length) return;
+    setEditSections((prev) => {
+      const next = prev.slice();
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return next;
     });
   };
 
@@ -317,7 +338,7 @@ export default function DraftLessonModal({
             >
               {drafting
                 ? 'Drafting…'
-                : draft
+                : hasDraft
                   ? '↻ Draft again'
                   : '✨ Draft with Claude'}
             </button>
@@ -329,42 +350,77 @@ export default function DraftLessonModal({
             </p>
           )}
 
-          {/* Draft output — editable */}
-          {draft && (
+          {/* Draft output — editable sections */}
+          {hasDraft && (
             <div className="space-y-3 border-t border-gray-100 pt-4">
-              <p className="text-xs font-medium text-gray-700">
-                Claude's draft — tweak before applying:
-              </p>
-              <div>
-                <label className="block text-[10px] uppercase tracking-wide text-gray-500 mb-1">
-                  Opening prompt
-                </label>
-                <textarea
-                  className="input w-full font-serif text-sm leading-relaxed min-h-[60px]"
-                  value={editOpening}
-                  onChange={(e) => setEditOpening(e.target.value)}
-                />
+              <div className="flex items-baseline justify-between">
+                <p className="text-xs font-medium text-gray-700">
+                  Claude's draft ({editSections.length} section{editSections.length === 1 ? '' : 's'}) — tweak before applying:
+                </p>
+                <button
+                  type="button"
+                  onClick={addDraftSection}
+                  className="text-[11px] text-umc-700 hover:text-umc-900 underline"
+                >
+                  + Add section
+                </button>
               </div>
-              <div>
-                <label className="block text-[10px] uppercase tracking-wide text-gray-500 mb-1">
-                  Pastor's notes (one bullet per line, starting with "- ")
-                </label>
-                <textarea
-                  className="input w-full font-serif text-sm leading-relaxed min-h-[200px]"
-                  value={editNotes}
-                  onChange={(e) => setEditNotes(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] uppercase tracking-wide text-gray-500 mb-1">
-                  Closing prompt
-                </label>
-                <input
-                  className="input w-full text-sm"
-                  value={editClosing}
-                  onChange={(e) => setEditClosing(e.target.value)}
-                />
-              </div>
+              <ul className="space-y-3">
+                {editSections.map((s, idx) => (
+                  <li
+                    key={idx}
+                    className="border border-gray-200 rounded p-2 space-y-2"
+                  >
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-[10px] uppercase tracking-wide text-gray-500 shrink-0">
+                        §{idx + 1}
+                      </span>
+                      <input
+                        type="text"
+                        className="input flex-1 text-sm font-medium"
+                        placeholder="Header"
+                        value={s.header || ''}
+                        onChange={(e) =>
+                          updateDraftSection(idx, { header: e.target.value })
+                        }
+                      />
+                      <div className="flex items-center gap-1 text-xs shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => moveDraftSection(idx, 'up')}
+                          disabled={idx === 0}
+                          className="text-gray-500 hover:text-gray-800 disabled:opacity-30 px-1"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveDraftSection(idx, 'down')}
+                          disabled={idx >= editSections.length - 1}
+                          className="text-gray-500 hover:text-gray-800 disabled:opacity-30 px-1"
+                        >
+                          ↓
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteDraftSection(idx)}
+                          className="text-red-600 hover:text-red-800 underline px-1"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                    <textarea
+                      className="input w-full font-serif text-sm leading-relaxed min-h-[100px]"
+                      placeholder="Body"
+                      value={s.body || ''}
+                      onChange={(e) =>
+                        updateDraftSection(idx, { body: e.target.value })
+                      }
+                    />
+                  </li>
+                ))}
+              </ul>
 
               {hasExistingNotes && (
                 <div className="text-xs flex items-center gap-3">
@@ -398,7 +454,7 @@ export default function DraftLessonModal({
           <button
             type="button"
             onClick={handleApply}
-            disabled={!draft || drafting}
+            disabled={!hasDraft || editSections.length === 0 || drafting}
             className="btn-primary text-sm disabled:opacity-50"
           >
             Apply to lesson

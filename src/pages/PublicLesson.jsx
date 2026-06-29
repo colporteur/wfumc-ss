@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { supabase, withTimeout } from '../lib/supabase';
 import { publicUrlFor } from '../lib/lessonImages';
-import { isHomeworkActive } from '../lib/lessons';
+import { isHomeworkActive, lessonSectionsOf } from '../lib/lessons';
+import LessonBodyView from '../components/LessonBodyView.jsx';
 import { PASTOR_USER_ID } from '../lib/config';
 import LoadingSpinner from '../components/LoadingSpinner.jsx';
 
@@ -97,7 +98,7 @@ export default function PublicLesson() {
   if (!topic) return null;
 
   const homework = isHomeworkActive(lesson || {});
-  const bullets = parseBullets(lesson?.pastor_notes || '');
+  const lessonSections = lessonSectionsOf(lesson);
 
   return (
     <article className="space-y-5">
@@ -144,36 +145,7 @@ export default function PublicLesson() {
         </div>
       )}
 
-      {!lesson ? (
-        <p className="text-sm text-gray-500 italic">
-          No lesson notes saved for this topic.
-        </p>
-      ) : (
-        <>
-          {lesson.opening_prompt && (
-            <p className="text-sm text-gray-800 font-serif leading-relaxed">
-              {lesson.opening_prompt}
-            </p>
-          )}
-          {bullets.length > 0 && (
-            <>
-              <p className="text-xs italic text-gray-600">
-                A few thoughts from Pastor Todd
-              </p>
-              <ul className="list-disc pl-5 space-y-2 text-sm text-gray-800 font-serif leading-relaxed">
-                {bullets.map((b, i) => (
-                  <li key={i}>{b}</li>
-                ))}
-              </ul>
-            </>
-          )}
-          {lesson.closing_prompt && (
-            <p className="text-sm text-gray-800 italic font-serif">
-              {lesson.closing_prompt}
-            </p>
-          )}
-        </>
-      )}
+      <LessonBodyView sections={lessonSections} />
 
       {images.length > 0 && (
         <div className="space-y-4 mt-6 pt-4 border-t border-gray-100">
@@ -197,31 +169,3 @@ export default function PublicLesson() {
   );
 }
 
-function parseBullets(notesText) {
-  if (!notesText) return [];
-  const lines = notesText.split(/\r?\n/);
-  const out = [];
-  let buffer = '';
-  const flush = () => {
-    if (buffer.trim()) out.push(buffer.trim());
-    buffer = '';
-  };
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line) {
-      flush();
-      continue;
-    }
-    const dash = line.match(/^[-*•]\s+(.*)$/);
-    if (dash) {
-      flush();
-      buffer = dash[1];
-    } else if (buffer) {
-      buffer += ' ' + line;
-    } else {
-      buffer = line;
-    }
-  }
-  flush();
-  return out;
-}

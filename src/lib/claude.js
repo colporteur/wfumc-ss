@@ -74,16 +74,24 @@ export async function draftLesson({
     'Each week one class member proposes a question; the pastor prepares',
     "reflections to spark discussion. You're writing those reflections.",
     '',
-    'OUTPUT STRUCTURE — exactly these three parts:',
-    '  1. opening_prompt   (1-3 sentences inviting the class into the',
-    '     question; conversational, not preachy)',
-    '  2. pastor_notes     (6-12 substantive bullets, one thought per',
-    '     bullet, in a pastoral-but-curious voice — willing to question,',
-    "     name tension, draw from scripture/tradition/news/personal",
-    "     experience. Bullets are NOT preachy summaries; they're things",
-    '     the pastor would actually share to advance group discussion.)',
-    '  3. closing_prompt   (1 short question inviting class response,',
-    "     typically 'What are your thoughts?' or similar)",
+    'OUTPUT STRUCTURE — a flexible ordered list of SECTIONS. Each section',
+    'has a HEADER (short topic-appropriate label) and a BODY (the prose',
+    'or bullet-list content). You decide how many sections fit the topic',
+    'and what to name them.',
+    '',
+    'Typical lesson shapes you might choose from (mix-and-match — these',
+    'are examples, not a required template):',
+    '  - "Opening Prompt" / "A few thoughts" / "Closing Prompt"',
+    '  - "Setting the Scene" / "The Scripture" / "Some Tensions" / "An Invitation"',
+    '  - "Anecdote" / "Background" / "Questions to Sit With" / "Closing"',
+    "  - Whatever else fits the topic well",
+    '',
+    'GUIDELINES:',
+    '  - 3-6 sections per lesson typically. Adapt to the topic.',
+    '  - Use bullet-list body ("- item\\n- item") for "thoughts" /',
+    '    "considerations" style sections; use prose for prompts /',
+    '    framing / scripture-quote sections.',
+    '  - Each section has substantive content — not throwaway labels.',
     '',
     'VOICE GUIDELINES:',
     '  - Thoughtful, ecumenical, intellectually honest. Lean Wesleyan',
@@ -95,10 +103,14 @@ export async function draftLesson({
     '  - Avoids: religious-jargon walls, false certainty, sentimentality,',
     '    political tribalism, mocking other Christian traditions.',
     '',
-    'OUTPUT FORMAT — return ONLY a JSON object, no prose around it:',
-    '  { "opening_prompt": "...", "pastor_notes": "- bullet 1\\n- bullet 2\\n...", "closing_prompt": "..." }',
-    '  pastor_notes is plain text with one bullet per line, each line',
-    "  starting with '- '. No code fences. No markdown headers.",
+    'OUTPUT FORMAT — return ONLY a JSON object with a "sections" array:',
+    '  { "sections": [',
+    '      {"header": "Opening Prompt", "body": "..."},',
+    '      {"header": "A few thoughts", "body": "- bullet 1\\n- bullet 2\\n..."},',
+    '      {"header": "Closing Prompt", "body": "What are your thoughts?"}',
+    '    ]',
+    '  }',
+    '  No prose around the object. No code fences. No markdown headers.',
   ].join('\n');
 
   const userParts = [];
@@ -144,20 +156,49 @@ export async function draftLesson({
   if (!parsed || typeof parsed !== 'object') {
     throw new Error("Couldn't parse Claude's draft response as JSON.");
   }
-  return {
-    opening_prompt:
-      typeof parsed.opening_prompt === 'string'
-        ? parsed.opening_prompt.trim()
-        : '',
-    pastor_notes:
-      typeof parsed.pastor_notes === 'string'
-        ? parsed.pastor_notes.trim()
-        : '',
-    closing_prompt:
-      typeof parsed.closing_prompt === 'string'
-        ? parsed.closing_prompt.trim()
-        : 'What are your thoughts?',
-  };
+  // Sections-array shape (current).
+  if (Array.isArray(parsed.sections)) {
+    const sections = parsed.sections
+      .filter((s) => s && typeof s === 'object')
+      .map((s) => ({
+        header: typeof s.header === 'string' ? s.header.trim() : '',
+        body: typeof s.body === 'string' ? s.body : '',
+      }))
+      .filter((s) => s.header || s.body.trim());
+    if (sections.length === 0) {
+      throw new Error('Claude returned an empty sections array.');
+    }
+    return { sections };
+  }
+  // Backward-compat: tolerate old three-field shape and convert.
+  if (
+    typeof parsed.opening_prompt === 'string' ||
+    typeof parsed.pastor_notes === 'string' ||
+    typeof parsed.closing_prompt === 'string'
+  ) {
+    const sections = [];
+    if (typeof parsed.opening_prompt === 'string' && parsed.opening_prompt.trim()) {
+      sections.push({
+        header: 'Opening Prompt',
+        body: parsed.opening_prompt.trim(),
+      });
+    }
+    if (typeof parsed.pastor_notes === 'string' && parsed.pastor_notes.trim()) {
+      sections.push({
+        header: "Pastor's Notes",
+        body: parsed.pastor_notes.trim(),
+      });
+    }
+    sections.push({
+      header: 'Closing Prompt',
+      body:
+        typeof parsed.closing_prompt === 'string' && parsed.closing_prompt.trim()
+          ? parsed.closing_prompt.trim()
+          : 'What are your thoughts?',
+    });
+    return { sections };
+  }
+  throw new Error("Claude's draft didn't include a sections array.");
 }
 
 // =====================================================================

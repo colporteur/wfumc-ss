@@ -134,29 +134,41 @@ export default function BulkImportLessons() {
         if (row.status === 'error' || !row.parsed) continue;
 
         try {
-          let nextNotes = row.parsed.text;
-          // Handle pre-existing lesson on this topic.
+          // Build sections from the imported text + handle pre-existing.
+          const importedSection = {
+            header: 'Lesson notes',
+            body: row.parsed.text,
+          };
+          let sectionsToWrite = [importedSection];
+
           if (row.dupeAction !== 'overwrite') {
             const existing = await loadLessonForTopic(row.chosenTopicId);
-            if (existing?.pastor_notes) {
+            const existingSections =
+              existing?.sections && existing.sections.length > 0
+                ? existing.sections
+                : [];
+            if (existingSections.length > 0) {
               if (row.dupeAction === 'skip') {
                 updateRow(row.id, { imported: true, status: 'skipped-existing' });
                 continue;
               }
               if (row.dupeAction === 'append') {
-                nextNotes =
-                  existing.pastor_notes.trim() +
-                  '\n\n--- imported from ' +
-                  (row.file.name || 'file') +
-                  ' ---\n\n' +
-                  row.parsed.text;
+                sectionsToWrite = [
+                  ...existingSections,
+                  {
+                    header:
+                      'Imported from ' + (row.file.name || 'file'),
+                    body: row.parsed.text,
+                  },
+                ];
               }
             }
           }
+
           await upsertLesson({
             ownerUserId: user.id,
             topicId: row.chosenTopicId,
-            pastorNotes: nextNotes,
+            sections: sectionsToWrite,
           });
           updateRow(row.id, { imported: true, status: 'imported' });
         } catch (e) {

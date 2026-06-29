@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import LoadingSpinner from '../components/LoadingSpinner.jsx';
@@ -6,7 +6,8 @@ import DraftLessonModal from '../components/DraftLessonModal.jsx';
 import BrainstormLessonModal from '../components/BrainstormLessonModal.jsx';
 import InsertVerseModal from '../components/InsertVerseModal.jsx';
 import LessonImagesPanel from '../components/LessonImagesPanel.jsx';
-import { loadImagesForClaude, listImages } from '../lib/lessonImages';
+import SectionEditor from '../components/SectionEditor.jsx';
+import { listImages } from '../lib/lessonImages';
 import { supabase, withTimeout } from '../lib/supabase';
 import {
   loadLessonForTopic,
@@ -14,7 +15,7 @@ import {
   computeHomeworkExpiration,
   isHomeworkActive,
 } from '../lib/lessons';
-import { updateTopic, setStatus } from '../lib/topics';
+import { setStatus } from '../lib/topics';
 import { exportLessonDocx } from '../lib/exportLessonDocx';
 
 // The lesson workspace — pastor drafts and refines the active or
@@ -39,11 +40,17 @@ export default function LessonWorkspace() {
   // Bumped after image-library mutations from inside a modal so the
   // LessonImagesPanel re-fetches.
   const [imagesRefreshKey, setImagesRefreshKey] = useState(0);
-  // Editable lesson fields. Mirrored from DB on load; pastor edits;
-  // Save button writes back.
-  const [openingPrompt, setOpeningPrompt] = useState('');
-  const [pastorNotes, setPastorNotes] = useState('');
-  const [closingPrompt, setClosingPrompt] = useState('What are your thoughts?');
+  // Lesson sections — ordered list of {header, body}. New lessons
+  // start with one empty section; legacy lessons get auto-converted
+  // on load (see lib/lessons.js).
+  const [sections, setSections] = useState([{ header: '', body: '' }]);
+  // Which section the cursor was last in, for routing ✨ Draft /
+  // 💡 Brainstorm / 📖 Insert-verse output to the right place.
+  // Defaults to the last section (most natural for appending notes).
+  const [activeSectionIdx, setActiveSectionIdx] = useState(0);
+  // Ref array so we can read selectionStart on the active textarea
+  // when inserting verses at the cursor.
+  const sectionBodyRefs = useRef([]);
   const [homeworkText, setHomeworkText] = useState('');
   const [homeworkExpiresAt, setHomeworkExpiresAt] = useState(null);
 
@@ -58,13 +65,13 @@ export default function LessonWorkspace() {
 
   const dirty = useMemo(() => {
     if (!savedSnapshot) return false;
-    return (
-      savedSnapshot.openingPrompt !== openingPrompt ||
-      savedSnapshot.pastorNotes !== pastorNotes ||
-      savedSnapshot.closingPrompt !== closingPrompt ||
-      (savedSnapshot.homeworkText || '') !== (homeworkText || '')
-    );
-  }, [savedSnapshot, openingPrompt, pastorNotes, closingPrompt, homeworkText]);
+    // Dirty if sections or homework differ from last-saved snapshot.
+    const savedSecJson = JSON.stringify(savedSnapshot.sections || []);
+    const currentSecJson = JSON.stringify(sections);
+    if (savedSecJson !== currentSecJson) return true;
+    if ((savedSnapshot.homeworkText || '') !== (homeworkText || '')) return true;
+    return false;
+  }, [savedSnapshot, sections, homeworkText]);
 
   const reload = async () => {
     if (!user?.id || !topicId) return;
@@ -86,20 +93,21 @@ export default function LessonWorkspace() {
       setTopic(t);
       const lesson = await loadLessonForTopic(topicId);
       setLessonId(lesson?.id || null);
-      const op = lesson?.opening_prompt || '';
-      const pn = lesson?.pastor_notes || '';
-      const cp = lesson?.closing_prompt || 'What are your thoughts?';
+      // loadLessonForTopic guarantees a sections array (auto-converted
+      // from legacy fields if needed). For brand-new lessons (no row
+      // yet), start with a single empty section.
+      const loadedSections =
+        lesson?.sections && lesson.sections.length > 0
+          ? lesson.sections
+          : [{ header: '', body: '' }];
+      setSections(loadedSections);
+      setActiveSectionIdx(Math.max(0, loadedSections.length - 1));
       const hw = lesson?.homework_text || '';
       const hex = lesson?.homework_expires_at || null;
-      setOpeningPrompt(op);
-      setPastorNotes(pn);
-      setClosingPrompt(cp);
       setHomeworkText(hw);
       setHomeworkExpiresAt(hex);
       setSavedSnapshot({
-        openingPrompt: op,
-        pastorNotes: pn,
-        closingPrompt: cp,
+        sections: loadedSections,
         homeworkText: hw,
       });
     } catch (e) {
@@ -122,8 +130,6 @@ export default function LessonWorkspace() {
       // We use the topic's discussed_on if present; otherwise next Sunday.
       let expiresAt = homeworkExpiresAt;
       if (homeworkText.trim()) {
-        // Anchor expiration to the discussion date if we have one
-        // (so old homework auto-hides on the right Sunday).
         const anchor = topic?.discussed_on
           ? new Date(topic.discussed_on + 'T00:00:00')
           : new Date();
@@ -134,17 +140,13 @@ export default function LessonWorkspace() {
       const savedLesson = await upsertLesson({
         ownerUserId: user.id,
         topicId,
-        openingPrompt: openingPrompt.trim() || null,
-        pastorNotes,
-        closingPrompt: closingPrompt.trim() || 'What are your thoughts?',
+        sections,
         homeworkText: homeworkText.trim() || null,
         homeworkExpiresAt: expiresAt,
       });
       if (savedLesson?.id && !lessonId) setLessonId(savedLesson.id);
       setSavedSnapshot({
-        openingPrompt,
-        pastorNotes,
-        closingPrompt,
+        sections: savedLesson?.sections || sections,
         homeworkText,
       });
       setHomeworkExpiresAt(expiresAt);
@@ -155,27 +157,138 @@ export default function LessonWorkspace() {
     }
   };
 
-  const applyDraft = ({ opening_prompt, pastor_notes, closing_prompt, mode }) => {
-    setOpeningPrompt(opening_prompt || openingPrompt);
-    setClosingPrompt(closing_prompt || closingPrompt);
-    if (mode === 'merge' && pastorNotes.trim()) {
-      const sep = pastorNotes.endsWith('\n') ? '' : '\n';
-      setPastorNotes(pastorNotes + sep + '\n' + pastor_notes);
-    } else {
-      setPastorNotes(pastor_notes || '');
+  // --- Section mutation helpers ---------------------------------------
+
+  const updateSection = (idx, patch) => {
+    setSections((prev) =>
+      prev.map((s, i) => (i === idx ? { ...s, ...patch } : s))
+    );
+  };
+
+  const addSection = () => {
+    setSections((prev) => {
+      const next = [...prev, { header: '', body: '' }];
+      setActiveSectionIdx(next.length - 1);
+      return next;
+    });
+  };
+
+  const deleteSection = (idx) => {
+    if (sections.length <= 1) {
+      // Don't allow deleting the last section — clear it instead.
+      setSections([{ header: '', body: '' }]);
+      setActiveSectionIdx(0);
+      return;
     }
+    if (
+      !window.confirm(
+        `Delete section "${sections[idx]?.header || 'this section'}"?`
+      )
+    ) {
+      return;
+    }
+    setSections((prev) => prev.filter((_, i) => i !== idx));
+    setActiveSectionIdx((cur) => Math.max(0, Math.min(cur, sections.length - 2)));
+  };
+
+  const moveSection = (idx, dir) => {
+    const target = dir === 'up' ? idx - 1 : idx + 1;
+    if (target < 0 || target >= sections.length) return;
+    setSections((prev) => {
+      const next = prev.slice();
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return next;
+    });
+    setActiveSectionIdx(target);
+  };
+
+  // applyDraft handles two shapes from the Draft modal:
+  //   - New sections-aware shape: { sections: [{header, body}, ...], mode }
+  //   - Legacy three-field shape: { opening_prompt, pastor_notes, closing_prompt, mode }
+  //     (kept temporarily for backward compat in case any cached modal
+  //     state references it)
+  const applyDraft = (payload) => {
+    const mode = payload?.mode || 'replace';
+    let incoming = [];
+    if (Array.isArray(payload?.sections)) {
+      incoming = payload.sections
+        .filter(
+          (s) => s && (typeof s.header === 'string' || typeof s.body === 'string')
+        )
+        .map((s) => ({
+          header: typeof s.header === 'string' ? s.header : '',
+          body: typeof s.body === 'string' ? s.body : '',
+        }));
+    } else {
+      // Legacy three-field path — synthesize sections.
+      if (payload?.opening_prompt) {
+        incoming.push({ header: 'Opening Prompt', body: payload.opening_prompt });
+      }
+      if (payload?.pastor_notes) {
+        incoming.push({ header: "Pastor's Notes", body: payload.pastor_notes });
+      }
+      if (payload?.closing_prompt) {
+        incoming.push({ header: 'Closing Prompt', body: payload.closing_prompt });
+      }
+    }
+    if (incoming.length === 0) {
+      setDraftOpen(false);
+      return;
+    }
+    setSections((prev) => {
+      const hasMeaningful = prev.some(
+        (s) => (s.header || '').trim() || (s.body || '').trim()
+      );
+      if (mode === 'merge' && hasMeaningful) {
+        return [...prev, ...incoming];
+      }
+      return incoming;
+    });
+    setActiveSectionIdx(incoming.length - 1);
     setDraftOpen(false);
   };
 
+  // Append brainstorm idea as a bullet at the end of the active section.
   const appendIdeaAsBullet = (idea) => {
     const bullet = '- ' + idea.replace(/^[-*•]\s+/, '').trim();
-    const sep = pastorNotes.trim() ? '\n' : '';
-    setPastorNotes(pastorNotes + sep + bullet);
+    setSections((prev) => {
+      const safeIdx = Math.max(0, Math.min(activeSectionIdx, prev.length - 1));
+      return prev.map((s, i) => {
+        if (i !== safeIdx) return s;
+        const cur = s.body || '';
+        const sep = cur.trim() ? (cur.endsWith('\n') ? '' : '\n') : '';
+        return { ...s, body: cur + sep + bullet };
+      });
+    });
   };
 
+  // Insert NRSVUe verse at cursor in active section's body, or append
+  // if no selection / unfocused.
   const insertVerseIntoNotes = (text) => {
-    const sep = pastorNotes.trim() ? '\n\n' : '';
-    setPastorNotes(pastorNotes + sep + text);
+    setSections((prev) => {
+      const safeIdx = Math.max(0, Math.min(activeSectionIdx, prev.length - 1));
+      return prev.map((s, i) => {
+        if (i !== safeIdx) return s;
+        const body = s.body || '';
+        const ref = sectionBodyRefs.current[safeIdx];
+        if (
+          ref &&
+          typeof ref.selectionStart === 'number' &&
+          typeof ref.selectionEnd === 'number' &&
+          ref === document.activeElement
+        ) {
+          const start = ref.selectionStart;
+          const end = ref.selectionEnd;
+          const before = body.slice(0, start);
+          const after = body.slice(end);
+          const pad = before.length && !before.endsWith('\n') ? '\n\n' : '';
+          const padAfter = after.length && !after.startsWith('\n') ? '\n\n' : '';
+          return { ...s, body: before + pad + text + padAfter + after };
+        }
+        const sep = body.trim() ? '\n\n' : '';
+        return { ...s, body: body + sep + text };
+      });
+    });
     setVerseOpen(false);
   };
 
@@ -188,9 +301,7 @@ export default function LessonWorkspace() {
       const images = lessonId ? await listImages(lessonId) : [];
       await exportLessonDocx({
         topicText: topic.text,
-        openingPrompt,
-        pastorNotes,
-        closingPrompt,
+        sections,
         images,
         dateForFilename: topic.discussed_on || '',
       });
@@ -384,42 +495,49 @@ export default function LessonWorkspace() {
         </p>
       )}
 
-      {/* Lesson editor */}
-      <div className="card space-y-4">
-        <div>
-          <label className="label">Opening prompt</label>
-          <textarea
-            className="input font-serif text-sm leading-relaxed min-h-[60px]"
-            value={openingPrompt}
-            onChange={(e) => setOpeningPrompt(e.target.value)}
-            placeholder="Brief invitation into the question (1-3 sentences)."
-          />
+      {/* Lesson editor — flexible sections */}
+      <div className="card space-y-3">
+        <div className="flex items-baseline justify-between gap-2">
+          <h2 className="font-serif text-lg text-umc-900">Sections</h2>
+          <span className="text-[11px] text-gray-500">
+            {sections.length} section{sections.length === 1 ? '' : 's'}
+            {' · '}
+            Active: §{Math.max(1, Math.min(activeSectionIdx + 1, sections.length))}
+          </span>
         </div>
+        <p className="text-[11px] text-gray-500">
+          Each section has a header and body. Name them whatever fits this
+          week's lesson. The "active" section (highlighted) receives
+          brainstorm "Use this" bullets and inserted verses.
+        </p>
+        <ul className="space-y-3">
+          {sections.map((s, idx) => (
+            <li key={idx}>
+              <SectionEditor
+                section={s}
+                index={idx}
+                total={sections.length}
+                isActive={idx === activeSectionIdx}
+                onChange={(patch) => updateSection(idx, patch)}
+                onDelete={() => deleteSection(idx)}
+                onMoveUp={() => moveSection(idx, 'up')}
+                onMoveDown={() => moveSection(idx, 'down')}
+                onFocusBody={() => setActiveSectionIdx(idx)}
+                bodyRef={(el) => {
+                  sectionBodyRefs.current[idx] = el;
+                }}
+              />
+            </li>
+          ))}
+        </ul>
         <div>
-          <div className="flex items-baseline justify-between gap-2 mb-1">
-            <label className="label mb-0">
-              Pastor notes (one bullet per line, starting with "- ")
-            </label>
-            <span className="text-[11px] text-gray-500">
-              {pastorNotes.split(/\r?\n/).filter((l) => l.trim()).length} lines
-            </span>
-          </div>
-          <textarea
-            className="input font-serif text-sm leading-relaxed min-h-[300px]"
-            value={pastorNotes}
-            onChange={(e) => setPastorNotes(e.target.value)}
-            placeholder={
-              '- bullet point one\n- bullet point two\n- bullet point three…'
-            }
-          />
-        </div>
-        <div>
-          <label className="label">Closing prompt</label>
-          <input
-            className="input text-sm"
-            value={closingPrompt}
-            onChange={(e) => setClosingPrompt(e.target.value)}
-          />
+          <button
+            type="button"
+            onClick={addSection}
+            className="btn-secondary text-sm"
+          >
+            + Add section
+          </button>
         </div>
 
         {/* Homework */}

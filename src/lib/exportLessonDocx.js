@@ -108,12 +108,9 @@ async function fetchImageForDocx(image) {
 
 export async function buildLessonDocx({
   topicText,
-  openingPrompt,
-  pastorNotes,
-  closingPrompt,
+  sections = [],
   images = [],
 }) {
-  const bullets = parseBullets(pastorNotes);
   const paragraphs = [];
 
   // Class banner
@@ -148,60 +145,76 @@ export async function buildLessonDocx({
     })
   );
 
-  // Opening prompt
-  if (openingPrompt && openingPrompt.trim()) {
-    paragraphs.push(
-      new Paragraph({
-        spacing: { after: 200 },
-        children: [
-          new TextRun({
-            text: openingPrompt.trim(),
-            size: 22, // 11pt
-          }),
-        ],
-      })
-    );
-  }
+  // Sections: each one renders as a bold italic header (skipped if blank)
+  // followed by body content. Bodies that look like bulleted lists
+  // ("- item\n- item") get rendered as a real Word bulleted list;
+  // anything else renders as prose paragraphs preserving line breaks.
+  for (const section of sections) {
+    const header = (section?.header || '').trim();
+    const body = section?.body || '';
+    if (!header && !body.trim()) continue;
 
-  // Pastor-notes header
-  if (bullets.length > 0) {
-    paragraphs.push(
-      new Paragraph({
-        spacing: { before: 120, after: 120 },
-        children: [
-          new TextRun({
-            text: 'A few thoughts from Pastor Todd',
-            italics: true,
-            size: 22,
-          }),
-        ],
-      })
-    );
-    for (const b of bullets) {
+    if (header) {
       paragraphs.push(
         new Paragraph({
-          numbering: { reference: 'bullets', level: 0 },
-          spacing: { after: 80 },
-          children: [new TextRun({ text: b, size: 22 })],
+          spacing: { before: 200, after: 120 },
+          children: [
+            new TextRun({
+              text: header,
+              italics: true,
+              bold: true,
+              size: 22, // 11pt
+            }),
+          ],
         })
       );
     }
-  }
 
-  // Closing prompt
-  if (closingPrompt && closingPrompt.trim()) {
-    paragraphs.push(
-      new Paragraph({
-        spacing: { before: 200 },
-        children: [
-          new TextRun({
-            text: closingPrompt.trim(),
-            italics: true,
-            size: 22,
-          }),
-        ],
-      })
-    );
+    if (!body.trim()) continue;
+
+    const bullets = parseBullets(body);
+    // Heuristic: if the body originally had dash-bullets on most non-empty
+    // lines, render as bullets. Otherwise render as prose paragraphs so
+    // we don't auto-bullet free prose.
+    const bulletLineCount = body
+      .split(/\r?\n/)
+      .filter((l) => /^[\s]*[-*•]\s+/.test(l)).length;
+    const totalLines = body
+      .split(/\r?\n/)
+      .filter((l) => l.trim()).length;
+    const looksLikeBulletList =
+      bullets.length > 0 && bulletLineCount >= Math.max(1, totalLines * 0.5);
+
+    if (looksLikeBulletList) {
+      for (const b of bullets) {
+        paragraphs.push(
+          new Paragraph({
+            numbering: { reference: 'bullets', level: 0 },
+            spacing: { after: 80 },
+            children: [new TextRun({ text: b, size: 22 })],
+          })
+        );
+      }
+    } else {
+      // Prose — one paragraph per blank-line-separated block, line breaks
+      // preserved within a block.
+      for (const block of body.split(/\n\s*\n/)) {
+        const trimmed = block.trim();
+        if (!trimmed) continue;
+        const lines = trimmed.split(/\r?\n/);
+        const runs = [];
+        lines.forEach((line, i) => {
+          runs.push(new TextRun({ text: line, size: 22 }));
+          if (i < lines.length - 1) runs.push(new TextRun({ break: 1 }));
+        });
+        paragraphs.push(
+          new Paragraph({
+            spacing: { after: 120 },
+            children: runs,
+          })
+        );
+      }
+    }
   }
 
   // Image appendix — print-flagged images only. Each gets a page-break

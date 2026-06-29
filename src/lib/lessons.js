@@ -11,6 +11,9 @@ import {
 
 /**
  * Load the lesson for a given topic, or null if not yet started.
+ * The returned object always has a `sections` field — even legacy
+ * rows whose data lives in opening_prompt/pastor_notes/closing_prompt
+ * get auto-converted into a 3-section array on the way out.
  */
 export async function loadLessonForTopic(topicId) {
   if (!topicId) return null;
@@ -22,28 +25,133 @@ export async function loadLessonForTopic(topicId) {
       .maybeSingle()
   );
   if (error) throw error;
-  return data || null;
+  if (!data) return null;
+  // Normalize: ensure data.sections is always a non-null array of
+  // {header, body} objects. If sections is empty AND we have legacy
+  // field content, hydrate from the legacy fields one-time.
+  let sections = Array.isArray(data.sections) ? data.sections.slice() : [];
+  if (sections.length === 0 && hasLegacyContent(data)) {
+    sections = legacyToSections(data);
+  }
+  return { ...data, sections };
+}
+
+/**
+ * Public helper for callers that load ss_lessons rows directly (e.g.
+ * the public-facing pages). Given a raw lesson row, return its sections
+ * array — using the new sections column if populated, otherwise
+ * synthesizing one from the legacy three-field columns.
+ */
+export function lessonSectionsOf(lesson) {
+  if (!lesson) return [];
+  if (Array.isArray(lesson.sections) && lesson.sections.length > 0) {
+    return lesson.sections;
+  }
+  if (hasLegacyContent(lesson)) {
+    return legacyToSections(lesson);
+  }
+  return [];
+}
+
+/**
+ * Are the deprecated opening_prompt / pastor_notes / closing_prompt
+ * columns populated with anything beyond the default closing prompt?
+ */
+function hasLegacyContent(lesson) {
+  if (lesson?.opening_prompt && lesson.opening_prompt.trim()) return true;
+  if (lesson?.pastor_notes && lesson.pastor_notes.trim()) return true;
+  // closing_prompt has a default of "What are your thoughts?" — count it
+  // as "legacy content" only if it deviates from default OR if there's
+  // anything else to convert.
+  return false;
+}
+
+/**
+ * Convert legacy 3-field lesson into a sections array. Skips empty
+ * sections so a lesson with only pastor_notes doesn't get padded with
+ * blank Opening/Closing sections.
+ */
+function legacyToSections(lesson) {
+  const out = [];
+  if (lesson.opening_prompt && lesson.opening_prompt.trim()) {
+    out.push({
+      header: 'Opening Prompt',
+      body: lesson.opening_prompt.trim(),
+    });
+  }
+  if (lesson.pastor_notes && lesson.pastor_notes.trim()) {
+    out.push({
+      header: "Pastor's Notes",
+      body: lesson.pastor_notes,
+    });
+  }
+  if (
+    lesson.closing_prompt &&
+    lesson.closing_prompt.trim() &&
+    lesson.closing_prompt.trim() !== 'What are your thoughts?'
+  ) {
+    out.push({
+      header: 'Closing Prompt',
+      body: lesson.closing_prompt.trim(),
+    });
+  } else if (out.length > 0) {
+    // Include the default closing prompt only if we already had real
+    // content above it — otherwise a fully-empty legacy lesson would
+    // pick up a spurious "What are your thoughts?" section.
+    out.push({
+      header: 'Closing Prompt',
+      body: 'What are your thoughts?',
+    });
+  }
+  return out;
+}
+
+/**
+ * Normalize a sections-input from the UI: drop entries with both empty
+ * header AND empty body, and trim header strings.
+ */
+function normalizeSections(sections) {
+  if (!Array.isArray(sections)) return [];
+  return sections
+    .map((s) => ({
+      header: typeof s?.header === 'string' ? s.header.trim() : '',
+      body: typeof s?.body === 'string' ? s.body : '',
+    }))
+    .filter((s) => s.header || s.body.trim());
 }
 
 /**
  * Upsert lesson for a topic. The unique constraint on topic_id keeps
  * us at one lesson per topic.
+ *
+ * Sections is the new primary payload. The legacy opening_prompt /
+ * pastor_notes / closing_prompt fields are still written for safety —
+ * we mirror the first three sections into those columns so a
+ * theoretical rollback wouldn't lose data. Once we're confident
+ * every active lesson has been re-saved we can drop them.
  */
 export async function upsertLesson({
   ownerUserId,
   topicId,
-  openingPrompt = null,
-  pastorNotes = '',
-  closingPrompt = 'What are your thoughts?',
+  sections = [],
   homeworkText = null,
   homeworkExpiresAt = null,
 }) {
+  const clean = normalizeSections(sections);
+  // Safety mirror to legacy columns: first three sections (if any) go
+  // into the legacy triple, with closing defaulting back to the
+  // standard prompt. Anything beyond 3 sections is lost in the mirror
+  // but preserved in the JSONB column.
+  const op = clean[0]?.body || null;
+  const pn = clean[1]?.body || '';
+  const cp = clean[2]?.body || 'What are your thoughts?';
   const payload = {
     owner_user_id: ownerUserId,
     topic_id: topicId,
-    opening_prompt: openingPrompt,
-    pastor_notes: pastorNotes,
-    closing_prompt: closingPrompt,
+    sections: clean,
+    opening_prompt: op && op.trim() ? op : null,
+    pastor_notes: pn,
+    closing_prompt: cp,
     homework_text: homeworkText,
     homework_expires_at: homeworkExpiresAt,
   };
@@ -55,7 +163,9 @@ export async function upsertLesson({
       .single()
   );
   if (error) throw error;
-  return data;
+  // Return the normalized sections so the workspace doesn't need to
+  // re-fetch to get them.
+  return { ...data, sections: clean };
 }
 
 /**
