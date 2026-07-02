@@ -17,6 +17,9 @@ import {
 } from '../lib/lessons';
 import { setStatus } from '../lib/topics';
 import { exportLessonDocx } from '../lib/exportLessonDocx';
+import { exportBackPageDocx } from '../lib/exportBackPageDocx';
+import { listTopics } from '../lib/topics';
+import { listMembers } from '../lib/members';
 
 // The lesson workspace — pastor drafts and refines the active or
 // picked-for-next lesson here. Route is /lesson/:topicId.
@@ -312,6 +315,34 @@ export default function LessonWorkspace() {
     }
   };
 
+  // Print the class back page — same content the Dashboard button
+  // generates (future topics + past topics + active roster). Handy to
+  // keep here so the pastor can print both the lesson handout and the
+  // back page in the same trip to the workspace.
+  const handlePrintBackPage = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const [allTopics, members] = await Promise.all([
+        listTopics(user.id),
+        listMembers(user.id),
+      ]);
+      const futureTopics = allTopics.filter(
+        (t) => t.status === 'possible_future'
+      );
+      const pastTopics = allTopics.filter((t) => t.status === 'past');
+      await exportBackPageDocx({
+        futureTopics,
+        pastTopics,
+        rosterMembers: members,
+      });
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleMarkActive = async () => {
     if (!window.confirm('Mark this lesson as the active (this-Sunday) lesson?'))
       return;
@@ -454,6 +485,15 @@ export default function LessonWorkspace() {
           className="btn-secondary text-sm disabled:opacity-50"
         >
           📄 Print to Word
+        </button>
+        <button
+          type="button"
+          onClick={handlePrintBackPage}
+          disabled={busy}
+          className="btn-secondary text-sm disabled:opacity-50"
+          title="Print the class back page — future topics + past topics + roster"
+        >
+          📋 Print Back Page
         </button>
         <div className="flex-1" />
         {topic.status === 'picked_for_next' && (

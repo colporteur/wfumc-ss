@@ -36,6 +36,7 @@ function sectionHeading(text) {
         text,
         italics: true,
         size: 24, // 12pt
+        font: 'Albertus Medium',
       }),
     ],
   });
@@ -45,7 +46,8 @@ function bulletParagraph(text) {
   return new Paragraph({
     numbering: { reference: 'backpage-bullets', level: 0 },
     spacing: { after: 40 },
-    children: [new TextRun({ text, size: 20 })], // 10pt — pack density
+    // 10pt — pack density
+    children: [new TextRun({ text, size: 20, font: 'Albertus Medium' })],
   });
 }
 
@@ -67,6 +69,7 @@ export async function buildBackPageDocx({
           bold: true,
           underline: {},
           size: 26,
+          font: 'Albertus Medium',
         }),
       ],
     })
@@ -78,7 +81,7 @@ export async function buildBackPageDocx({
     paragraphs.push(
       new Paragraph({
         children: [
-          new TextRun({ text: '(none)', italics: true, color: '888888', size: 20 }),
+          new TextRun({ text: '(none)', italics: true, color: '888888', size: 20, font: 'Albertus Medium' }),
         ],
       })
     );
@@ -94,7 +97,7 @@ export async function buildBackPageDocx({
     paragraphs.push(
       new Paragraph({
         children: [
-          new TextRun({ text: '(none)', italics: true, color: '888888', size: 20 }),
+          new TextRun({ text: '(none)', italics: true, color: '888888', size: 20, font: 'Albertus Medium' }),
         ],
       })
     );
@@ -110,7 +113,7 @@ export async function buildBackPageDocx({
     paragraphs.push(
       new Paragraph({
         children: [
-          new TextRun({ text: '(none)', italics: true, color: '888888', size: 20 }),
+          new TextRun({ text: '(none)', italics: true, color: '888888', size: 20, font: 'Albertus Medium' }),
         ],
       })
     );
@@ -121,7 +124,7 @@ export async function buildBackPageDocx({
     paragraphs.push(
       new Paragraph({
         spacing: { after: 120 },
-        children: [new TextRun({ text: names, size: 20 })],
+        children: [new TextRun({ text: names, size: 20, font: 'Albertus Medium' })],
       })
     );
   }

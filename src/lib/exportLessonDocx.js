@@ -124,6 +124,7 @@ export async function buildLessonDocx({
           bold: true,
           underline: {},
           size: 26, // 13pt
+          font: 'Albertus Medium',
         }),
       ],
     })
@@ -140,6 +141,7 @@ export async function buildLessonDocx({
           bold: true,
           italics: true,
           size: 24, // 12pt
+          font: 'Albertus Medium',
         }),
       ],
     })
@@ -163,6 +165,7 @@ export async function buildLessonDocx({
               text: header,
               bold: true,
               size: 22, // 11pt
+              font: 'Albertus Medium',
             }),
           ],
         })
@@ -190,7 +193,7 @@ export async function buildLessonDocx({
           new Paragraph({
             numbering: { reference: 'bullets', level: 0 },
             spacing: { after: 80 },
-            children: [new TextRun({ text: b, size: 22 })],
+            children: [new TextRun({ text: b, size: 22, font: 'Albertus Medium' })],
           })
         );
       }
@@ -203,7 +206,7 @@ export async function buildLessonDocx({
         const lines = trimmed.split(/\r?\n/);
         const runs = [];
         lines.forEach((line, i) => {
-          runs.push(new TextRun({ text: line, size: 22 }));
+          runs.push(new TextRun({ text: line, size: 22, font: 'Albertus Medium' }));
           if (i < lines.length - 1) runs.push(new TextRun({ break: 1 }));
         });
         paragraphs.push(
@@ -236,6 +239,7 @@ export async function buildLessonDocx({
             text: 'Images',
             italics: true,
             size: 24,
+            font: 'Albertus Medium',
           }),
         ],
       })
@@ -273,6 +277,7 @@ export async function buildLessonDocx({
                   italics: true,
                   size: 20,
                   color: '555555',
+                  font: 'Albertus Medium',
                 }),
               ],
             })
@@ -291,6 +296,7 @@ export async function buildLessonDocx({
                 italics: true,
                 color: 'aa3333',
                 size: 20,
+                font: 'Albertus Medium',
               }),
             ],
           })
