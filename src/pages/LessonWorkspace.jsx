@@ -15,7 +15,7 @@ import {
   computeHomeworkExpiration,
   isHomeworkActive,
 } from '../lib/lessons';
-import { setStatus } from '../lib/topics';
+import { setStatus, updateTopic } from '../lib/topics';
 import { exportLessonDocx } from '../lib/exportLessonDocx';
 import { exportBackPageDocx } from '../lib/exportBackPageDocx';
 import { listTopics } from '../lib/topics';
@@ -37,6 +37,11 @@ export default function LessonWorkspace() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [topic, setTopic] = useState(null);
+  // Inline topic-text editing (the workspace used to be read-only on
+  // the topic itself — editing lived on the Topics page only).
+  const [editingTopic, setEditingTopic] = useState(false);
+  const [topicDraft, setTopicDraft] = useState('');
+  const [savingTopic, setSavingTopic] = useState(false);
   // The lesson row's id — captured after first load/upsert. Required
   // before images can be attached (the image rows reference it).
   const [lessonId, setLessonId] = useState(null);
@@ -447,9 +452,65 @@ export default function LessonWorkspace() {
             {topic.discussed_on && `For ${topic.discussed_on}`}
           </span>
         </div>
-        <h1 className="font-serif text-2xl text-umc-900 leading-tight">
-          {topic.text}
-        </h1>
+        {editingTopic ? (
+          <div className="space-y-2">
+            <textarea
+              className="input w-full font-serif text-xl leading-tight"
+              rows={2}
+              value={topicDraft}
+              onChange={(e) => setTopicDraft(e.target.value)}
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="btn-primary text-xs disabled:opacity-50"
+                disabled={savingTopic || !topicDraft.trim()}
+                onClick={async () => {
+                  setSavingTopic(true);
+                  try {
+                    const updated = await updateTopic(topic.id, {
+                      text: topicDraft,
+                    });
+                    // Preserve joined fields (picked_by) the update
+                    // select doesn't return.
+                    setTopic((cur) => ({ ...cur, ...updated }));
+                    setEditingTopic(false);
+                  } catch (e) {
+                    setError(e.message || String(e));
+                  } finally {
+                    setSavingTopic(false);
+                  }
+                }}
+              >
+                {savingTopic ? 'Saving…' : 'Save topic'}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary text-xs"
+                disabled={savingTopic}
+                onClick={() => setEditingTopic(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <h1 className="font-serif text-2xl text-umc-900 leading-tight">
+            {topic.text}{' '}
+            <button
+              type="button"
+              className="align-middle text-xs font-sans text-gray-400 hover:text-umc-700 underline"
+              title="Edit the topic text right here (also updates it on the Topics page — same record)."
+              onClick={() => {
+                setTopicDraft(topic.text || '');
+                setEditingTopic(true);
+              }}
+            >
+              Edit
+            </button>
+          </h1>
+        )}
       </div>
 
       {/* Action bar */}
