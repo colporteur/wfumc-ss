@@ -65,6 +65,11 @@ export default function LessonWorkspace() {
   const [savedSnapshot, setSavedSnapshot] = useState(null);
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Auto-save state. Set on every successful save (manual or auto) so
+  // the header can show "Saved 10:32:05" instead of leaving the pastor
+  // to wonder — this workspace lost a draft once; never again.
+  const [savedAt, setSavedAt] = useState(null);
+  const autosaveTimerRef = useRef(null);
 
   // Modal state
   const [draftOpen, setDraftOpen] = useState(false);
@@ -130,6 +135,29 @@ export default function LessonWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, topicId]);
 
+  // Debounced auto-save: 3 seconds after the last edit while dirty.
+  // Mirrors the Sermons Workspace pattern. Guards:
+  //   - not during initial load or an in-flight save/AI action
+  //   - a lesson that's entirely empty AND has no row yet doesn't
+  //     autosave (merely opening a topic shouldn't create junk rows)
+  useEffect(() => {
+    if (loading || !dirty || saving || busy) return undefined;
+    const isEmpty =
+      !homeworkText.trim() &&
+      sections.every((s) => !(s.header || '').trim() && !(s.body || '').trim());
+    if (isEmpty && !lessonId) return undefined;
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = setTimeout(() => {
+      handleSave().catch(() => {
+        /* errors surface via setError inside handleSave */
+      });
+    }, 3000);
+    return () => {
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sections, homeworkText, dirty, loading, saving, busy]);
+
   const handleSave = async () => {
     setSaving(true);
     setError(null);
@@ -158,6 +186,7 @@ export default function LessonWorkspace() {
         homeworkText,
       });
       setHomeworkExpiresAt(expiresAt);
+      setSavedAt(new Date());
     } catch (e) {
       setError(e.message || String(e));
     } finally {
@@ -674,7 +703,14 @@ export default function LessonWorkspace() {
             {saving ? 'Saving…' : dirty ? 'Save' : 'Saved'}
           </button>
           {dirty && (
-            <span className="text-xs text-amber-700">Unsaved changes</span>
+            <span className="text-xs text-amber-700">
+              Unsaved changes — autosaving…
+            </span>
+          )}
+          {!dirty && savedAt && (
+            <span className="text-xs text-green-700">
+              Saved {savedAt.toLocaleTimeString()}
+            </span>
           )}
         </div>
       </div>
