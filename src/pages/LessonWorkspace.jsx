@@ -173,17 +173,25 @@ export default function LessonWorkspace() {
       } else {
         expiresAt = null;
       }
+      // Capture exactly what the editor held at the moment we saved.
+      // The snapshot must mirror the *editor state*, not the normalized
+      // sections the upsert returns (trimmed headers, empty sections
+      // dropped) — otherwise a stray empty section or trailing space
+      // makes `dirty` never clear, and the autosave loop re-saves
+      // every 3 seconds forever ("Unsaved changes — autosaving…").
+      const sectionsAtSave = sections;
+      const homeworkAtSave = homeworkText;
       const savedLesson = await upsertLesson({
         ownerUserId: user.id,
         topicId,
-        sections,
-        homeworkText: homeworkText.trim() || null,
+        sections: sectionsAtSave,
+        homeworkText: homeworkAtSave.trim() || null,
         homeworkExpiresAt: expiresAt,
       });
       if (savedLesson?.id && !lessonId) setLessonId(savedLesson.id);
       setSavedSnapshot({
-        sections: savedLesson?.sections || sections,
-        homeworkText,
+        sections: sectionsAtSave,
+        homeworkText: homeworkAtSave,
       });
       setHomeworkExpiresAt(expiresAt);
       setSavedAt(new Date());
@@ -728,7 +736,9 @@ export default function LessonWorkspace() {
       {draftOpen && (
         <DraftLessonModal
           question={topic.text}
-          currentNotes={pastorNotes}
+          currentNotes={sections
+            .map((s) => `${s.header || ''}\n${s.body || ''}`)
+            .join('\n\n')}
           lessonId={lessonId}
           ownerUserId={user.id}
           onApply={applyDraft}
